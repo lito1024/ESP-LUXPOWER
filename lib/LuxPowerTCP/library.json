@@ -1,0 +1,15 @@
+{
+  "name": "LuxPowerTCP",
+  "version": "0.1.0",
+  "frameworks": ["arduino", "espidf"],
+  "platforms": ["espressif32"],
+  "authors": [
+    {
+      "name": "Alexander Melnik"
+    }
+  ],
+  "description": "Read-only LuxPower TCP protocol wrapper for Arduino, ESP-IDF and ESPHome",
+  "build": {
+    "srcDir": "src"
+  }
+}
