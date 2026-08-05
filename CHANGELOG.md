@@ -1,6 +1,22 @@
 # Changelog
 
-## [Unreleased]
+## 1.0.0 - 2026-08-05
+
+Sweet POWER v1.0.0 release. Architecture frozen as the stable production
+baseline for the Sweet Power project family -- see
+`SweetPower-Project-Docs/RELEASE_NOTES_v1.0.md` for the full cross-project
+release summary. Read-only throughout: only `MODBUS_FUNCTION_READ_HOLDING
+(0x03)` and `MODBUS_FUNCTION_READ_INPUT (0x04)` are implemented. Includes
+the second independent Modbus input register block (registers 125-249,
+added to reach `load_power`) needed for Stage 32's two-inverter operation,
+and the catalog's `update_class` (FAST/NORMAL/SLOW) property backing
+catalog-driven telemetry scheduling, on top of everything below
+(previously accumulated as unreleased work, now shipped as 1.0.0).
+
+### Stage 22A
+- Added a canonical machine-readable verified entity catalog.
+- Added generated verified entity audit documentation and future control documentation.
+- Added a deterministic entity-model generator with freshness check mode.
 
 ### Stage 15B-15D
 - Added a framework-neutral LuxPower transport abstraction plus Arduino compatibility transport.

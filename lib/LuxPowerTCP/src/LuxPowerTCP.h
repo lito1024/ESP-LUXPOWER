@@ -63,6 +63,7 @@ public:
 
     bool poll();
     void setInputPollInterval(uint32_t intervalMs);
+    void setInputBlock2PollInterval(uint32_t intervalMs);
     void setHoldingPollInterval(uint32_t intervalMs);
 
     bool readHoldingU16(uint16_t address);
@@ -84,6 +85,11 @@ public:
     const char *lastError() const;
     bool inputCacheValid() const;
     uint32_t inputCacheAge() const;
+    // Stage 31: second input block (registers 125..249), added to reach
+    // load_power (register 170). Independent validity/age from the
+    // primary 0..124 block.
+    bool inputBlock2CacheValid() const;
+    uint32_t inputBlock2CacheAge() const;
     bool holdingCacheValid() const;
     uint32_t holdingCacheAge() const;
     bool cachedInputU16(uint16_t address, uint16_t &value) const;
@@ -98,13 +104,24 @@ public:
 #endif
 
 private:
+    // Stage 31: a second contiguous input block (registers 125..249) was
+    // added solely to reach load_power (register 170) for FAST-class
+    // telemetry -- see docs/ADR for the polling-impact rationale. Block 1
+    // (0..124) and holding (0..124) are unchanged.
+    static constexpr uint16_t kInputBlock1Size = 125;
+    static constexpr uint16_t kInputBlock2Size = 125;
+    static constexpr uint16_t kInputTotalSize = kInputBlock1Size + kInputBlock2Size;
+    static constexpr uint16_t kHoldingSize = 125;
+
     struct RegisterCache
     {
-        uint16_t input[125]{};
-        uint16_t holding[125]{};
+        uint16_t input[kInputTotalSize]{};
+        uint16_t holding[kHoldingSize]{};
         bool inputValid = false;
+        bool inputBlock2Valid = false;
         bool holdingValid = false;
         uint32_t inputUpdated = 0;
+        uint32_t inputBlock2Updated = 0;
         uint32_t holdingUpdated = 0;
 
         void clear()
@@ -112,12 +129,17 @@ private:
             for (size_t i = 0; i < sizeof(input) / sizeof(input[0]); ++i)
             {
                 input[i] = 0;
+            }
+            for (size_t i = 0; i < sizeof(holding) / sizeof(holding[0]); ++i)
+            {
                 holding[i] = 0;
             }
 
             inputValid = false;
+            inputBlock2Valid = false;
             holdingValid = false;
             inputUpdated = 0;
+            inputBlock2Updated = 0;
             holdingUpdated = 0;
         }
     };
@@ -130,6 +152,7 @@ private:
     bool parseRegisterResponse(const uint8_t *packet, size_t length, uint16_t expectedRegister, uint8_t expectedFunction, uint16_t &value16);
     bool parseRegisterResponseU32(const uint8_t *packet, size_t length, uint16_t expectedRegister, uint8_t expectedFunction, uint32_t &value32);
     bool refreshInputBlock();
+    bool refreshInputBlock2();
     bool refreshHoldingBlock();
     bool readRegister(uint16_t address, uint8_t functionCode, uint16_t &value16);
     bool readRegisterU32(uint16_t address, uint8_t functionCode, uint32_t &value32);
@@ -146,11 +169,12 @@ private:
     uint16_t lastU16_;
     uint32_t lastU32_;
     RegisterCache cache_;
-    uint16_t previousInput_[125]{};
-    uint16_t previousHolding_[125]{};
+    uint16_t previousInput_[kInputTotalSize]{};
+    uint16_t previousHolding_[kHoldingSize]{};
     bool previousInputValid_ = false;
     bool previousHoldingValid_ = false;
     uint32_t inputPollInterval_;
+    uint32_t inputBlock2PollInterval_;
     uint32_t holdingPollInterval_;
     uint32_t lastConnectAttemptMs_;
     uint8_t consecutiveResponseTimeouts_;
