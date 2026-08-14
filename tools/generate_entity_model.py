@@ -24,6 +24,193 @@ STATUS_DEPRECATED = "DEPRECATED"
 VALID_STATUSES = {STATUS_PRODUCTION, STATUS_UNDER_REVIEW, STATUS_KNOWN_ISSUE, STATUS_DEPRECATED}
 ACTIVE_STATUSES = {STATUS_PRODUCTION, STATUS_UNDER_REVIEW, STATUS_KNOWN_ISSUE}
 
+# Stage 39: non-LuxPower telemetry fields. These are intentionally NOT part
+# of luxpower_entities.json and must not be generated into Gateway polling
+# schedules, because Gateway is authoritative only for LuxPower source data.
+# They do belong in the shared ESP-TELEMETRY field table and Display metadata.
+SUPPLEMENTAL_PROTOCOL_ENTITIES = [
+    {
+        "key": "system_output_voltage",
+        "name": "System Output Voltage",
+        "unit": "V",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10001,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "system_output_current",
+        "name": "System Output Current",
+        "unit": "A",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10002,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 100,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "system_output_power",
+        "name": "System Output Power",
+        "unit": "W",
+        "accuracy_decimals": 0,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10003,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 1,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "system_output_energy",
+        "name": "System Output Energy",
+        "unit": "kWh",
+        "accuracy_decimals": 2,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10004,
+        "protocol_group": "ENERGY_TOTALS",
+        "protocol_scale": 100,
+        "protocol_type": "int32",
+        "update_class": "SLOW",
+    },
+    {
+        "key": "system_output_frequency",
+        "name": "System Output Frequency",
+        "unit": "Hz",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10005,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "system_output_power_factor",
+        "name": "System Output Power Factor",
+        "unit": "",
+        "accuracy_decimals": 2,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10006,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 100,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "grid_input_voltage",
+        "name": "Grid Input Voltage",
+        "unit": "V",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10007,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "grid_input_current",
+        "name": "Grid Input Current",
+        "unit": "A",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10008,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 100,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "grid_input_power",
+        "name": "Grid Input Power",
+        "unit": "W",
+        "accuracy_decimals": 0,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10009,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 1,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "grid_input_energy",
+        "name": "Grid Input Energy",
+        "unit": "kWh",
+        "accuracy_decimals": 2,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10010,
+        "protocol_group": "ENERGY_TOTALS",
+        "protocol_scale": 100,
+        "protocol_type": "int32",
+        "update_class": "SLOW",
+    },
+    {
+        "key": "grid_input_frequency",
+        "name": "Grid Input Frequency",
+        "unit": "Hz",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10011,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "grid_input_power_factor",
+        "name": "Grid Input Power Factor",
+        "unit": "",
+        "accuracy_decimals": 2,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10012,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 100,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "grid_raw_voltage",
+        "name": "Grid Raw Voltage",
+        "unit": "V",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10013,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "display_enabled",
+        "name": "Display Enabled",
+        "unit": "",
+        "accuracy_decimals": 0,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10014,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 1,
+        "protocol_type": "bool",
+        "update_class": "FAST",
+    },
+    {
+        "key": "garage_presence",
+        "name": "Garage Presence",
+        "unit": "",
+        "accuracy_decimals": 0,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 11001,
+        "protocol_group": "STATUS",
+        "protocol_scale": 1,
+        "protocol_type": "bool",
+        "update_class": "FAST",
+    },
+]
+
 # Stage 31: catalog-driven telemetry scheduling. Every production entity
 # must have exactly one update_class, generated alongside FieldId so
 # Gateway/Display never hand-maintain a duplicate class table.
@@ -73,6 +260,10 @@ def load_catalog(path: Path) -> dict:
 def active_entities(catalog: dict) -> list[dict]:
     """Entities that are generated into the wire protocol: everything except DEPRECATED."""
     return [entity for entity in catalog["entities"] if entity["status"] in ACTIVE_STATUSES]
+
+
+def protocol_entities(catalog: dict) -> list[dict]:
+    return active_entities(catalog) + SUPPLEMENTAL_PROTOCOL_ENTITIES
 
 
 def validate_catalog(catalog: dict) -> list[str]:
@@ -313,7 +504,7 @@ def render_future_controls(catalog: dict) -> str:
 
 
 def render_protocol_fields_h(catalog: dict) -> str:
-    entities = sorted(active_entities(catalog), key=lambda item: item["protocol_field_id"])
+    entities = sorted(protocol_entities(catalog), key=lambda item: item["protocol_field_id"])
     lines = [
         f"// {HEADER}",
         "#ifndef ESP_TELEMETRY_FIELDS_H",
@@ -446,7 +637,7 @@ def render_gateway_metadata_h(catalog: dict) -> str:
 
 
 def render_display_metadata_h(catalog: dict) -> str:
-    entities = sorted(active_entities(catalog), key=lambda item: item["protocol_field_id"])
+    entities = sorted(protocol_entities(catalog), key=lambda item: item["protocol_field_id"])
     lines = [
         f"// {HEADER}",
         "#pragma once",
@@ -479,7 +670,7 @@ def render_display_metadata_h(catalog: dict) -> str:
 
 
 def render_protocol_v2(catalog: dict) -> str:
-    entities = sorted(active_entities(catalog), key=lambda item: item["protocol_field_id"])
+    entities = sorted(protocol_entities(catalog), key=lambda item: item["protocol_field_id"])
     lines = [f"<!-- {HEADER} -->", "# ESP Telemetry Protocol V2", ""]
     lines.append("Protocol v2 keeps the existing `SPDP` magic and CRC16 protection while allowing grouped semantic telemetry fields.")
     lines.append("")
@@ -510,7 +701,9 @@ def render_protocol_v2(catalog: dict) -> str:
                     ["17", "ENERGY_TOTALS", "Energy counters, about every 30 seconds."],
                     ["18", "STATUS", "Read-only status flags, about every 5 seconds."],
                     ["19", "DIAGNOSTICS", "Gateway/protocol diagnostics plus lower-cadence production fields."],
-                    ["32-63", "Future command range", "Reserved; not implemented in Stage 22A."],
+                    ["32", "COMMAND", "Controller -> Gateway typed command request."],
+                    ["33", "COMMAND_RESULT", "Gateway -> Controller typed command result."],
+                    ["34-63", "Future command range", "Reserved for future typed commands."],
                 ],
                 ["ID", "Name", "Purpose"],
             ),
@@ -521,10 +714,11 @@ def render_protocol_v2(catalog: dict) -> str:
             "",
             markdown_table(
                 [
-                    ["0", "1", "group_id", "1 fast, 2 energy, 3 status, 4 diagnostics"],
-                    ["1", "1", "field_count", "number of following field records"],
-                    ["2", "2", "group_flags", "bit 0 = group values valid, bit 1 = cache valid"],
-                    ["4", "6 * field_count", "records", "`field_id:u16` + `value:i32`, little-endian"],
+                    ["0", "1", "device_id", "Source identity: `1` inverter 1, `2` inverter 2, `3` Controller/system, `4` Garage Sensor"],
+                    ["1", "1", "group_id", "1 fast, 2 energy, 3 status, 4 diagnostics"],
+                    ["2", "1", "field_count", "number of following field records"],
+                    ["3", "2", "group_flags", "bit 0 = group values valid, bit 1 = cache valid"],
+                    ["5", "6 * field_count", "records", "`field_id:u16` + `value:i32`, little-endian"],
                 ],
                 ["Offset", "Size", "Field", "Description"],
             ),

@@ -12,7 +12,16 @@ constexpr LuxPowerRegisterDescriptor kVerifiedRegisters[] = {
     {"PV2 Power", "W", LuxPowerRegisterSpace::Input, LuxPowerRegisterValueType::U16, 8, 0, 1.0f},
     {"Battery SOC", "%", LuxPowerRegisterSpace::Input, LuxPowerRegisterValueType::U16, 5, 0, 1.0f},
     {"Battery Charge Power", "W", LuxPowerRegisterSpace::Input, LuxPowerRegisterValueType::U16, 10, 0, 1.0f},
-    {"Battery Discharge Power", "W", LuxPowerRegisterSpace::Input, LuxPowerRegisterValueType::U16, 11, 0, 1.0f}
+    {"Battery Discharge Power", "W", LuxPowerRegisterSpace::Input, LuxPowerRegisterValueType::U16, 11, 0, 1.0f},
+    // Stage 35: confirmed via live diagnostic-mode discovery on Inverter #2
+    // (0 -> 70 -> 30 -> 50 -> 0 app sequence, raw value == percent exactly,
+    // no collateral register changes). See stages/Stage35.md.
+    {"Max Backflow Power", "%", LuxPowerRegisterSpace::Holding, LuxPowerRegisterValueType::U16, 103, 0, 1.0f},
+    // Stage 35: confirmed via live diagnostic-mode discovery on Inverter #2
+    // (OFF -> ON -> OFF app sequence, bit 15 tracked exactly, reversible).
+    // NOT the same register as FeedInGridEnabled (22) -- that register did
+    // not respond to the same test. See stages/Stage35.md.
+    {"Zero Export Enabled", "", LuxPowerRegisterSpace::Holding, LuxPowerRegisterValueType::Bit, 21, 15, 1.0f}
 };
 
 bool lookupMetricDescriptor(LuxPowerMetric metric, LuxPowerRegisterDescriptor &descriptor)
@@ -39,6 +48,12 @@ bool lookupMetricDescriptor(LuxPowerMetric metric, LuxPowerRegisterDescriptor &d
 
         case LuxPowerMetric::BatteryDischargePower:
             return luxPowerRegisterDescriptor(LuxPowerRegisterId::BatteryDischargePower, descriptor);
+
+        case LuxPowerMetric::MaxBackflowPower:
+            return luxPowerRegisterDescriptor(LuxPowerRegisterId::MaxBackflowPower, descriptor);
+
+        case LuxPowerMetric::ZeroExportEnabled:
+            return luxPowerRegisterDescriptor(LuxPowerRegisterId::ZeroExportEnabled, descriptor);
     }
 
     return false;
@@ -97,6 +112,14 @@ bool luxPowerRegisterDescriptor(LuxPowerRegisterId id, LuxPowerRegisterDescripto
 
         case LuxPowerRegisterId::BatteryDischargePower:
             descriptor = kVerifiedRegisters[6];
+            return true;
+
+        case LuxPowerRegisterId::MaxBackflowPower:
+            descriptor = kVerifiedRegisters[7];
+            return true;
+
+        case LuxPowerRegisterId::ZeroExportEnabled:
+            descriptor = kVerifiedRegisters[8];
             return true;
     }
 
@@ -478,6 +501,34 @@ bool LuxPowerTCP::metricValue(LuxPowerMetric metric, LuxPowerMetricValue &value)
             value.boolValue = false;
             return true;
         }
+
+        case LuxPowerMetric::MaxBackflowPower:
+        {
+            float percent = 0.0f;
+            const bool ok = maxBackflowPower(percent);
+            if (!ok)
+            {
+                return false;
+            }
+            value.type = LuxPowerMetricValue::Type::Float;
+            value.floatValue = percent;
+            value.boolValue = false;
+            return true;
+        }
+
+        case LuxPowerMetric::ZeroExportEnabled:
+        {
+            bool enabled = false;
+            const bool ok = zeroExportEnabled(enabled);
+            if (!ok)
+            {
+                return false;
+            }
+            value.type = LuxPowerMetricValue::Type::Boolean;
+            value.floatValue = 0.0f;
+            value.boolValue = enabled;
+            return true;
+        }
     }
 
     return false;
@@ -535,6 +586,71 @@ bool LuxPowerTCP::feedInGridEnabled(bool &enabled) const
             enabled = false;
             return false;
         }
+    }
+
+    const uint16_t mask = static_cast<uint16_t>(1U << descriptor.bit);
+    enabled = (rawValue & mask) != 0;
+    return true;
+}
+
+bool LuxPowerTCP::maxBackflowPower(float &percent) const
+{
+    LuxPowerRegisterDescriptor descriptor{};
+    if (!luxPowerRegisterDescriptor(LuxPowerRegisterId::MaxBackflowPower, descriptor))
+    {
+        percent = 0.0f;
+        return false;
+    }
+
+    if (descriptor.space != LuxPowerRegisterSpace::Holding || descriptor.type != LuxPowerRegisterValueType::U16)
+    {
+        percent = 0.0f;
+        return false;
+    }
+
+    if (!cache_.holdingValid)
+    {
+        percent = 0.0f;
+        return false;
+    }
+
+    uint16_t rawValue = 0;
+    if (!cachedHoldingU16(descriptor.address, rawValue))
+    {
+        percent = 0.0f;
+        return false;
+    }
+
+    percent = static_cast<float>(rawValue) * descriptor.scale;
+    return true;
+}
+
+bool LuxPowerTCP::zeroExportEnabled(bool &enabled) const
+{
+    LuxPowerRegisterDescriptor descriptor{};
+    if (!luxPowerRegisterDescriptor(LuxPowerRegisterId::ZeroExportEnabled, descriptor))
+    {
+        enabled = false;
+        return false;
+    }
+
+    if (descriptor.space != LuxPowerRegisterSpace::Holding || descriptor.type != LuxPowerRegisterValueType::Bit)
+    {
+        enabled = false;
+        return false;
+    }
+
+    if (!cache_.holdingValid)
+    {
+        enabled = false;
+        return false;
+    }
+
+    uint16_t rawValue = 0;
+    if (!cachedHoldingU16(descriptor.address, rawValue))
+    {
+        enabled = false;
+        return false;
     }
 
     const uint16_t mask = static_cast<uint16_t>(1U << descriptor.bit);
@@ -967,6 +1083,322 @@ size_t LuxPowerTCP::buildReadRequest(uint8_t *packet, size_t packetCapacity, uin
     packet[pos++] = (crc >> 8) & 0xFF;
 
     return pos;
+}
+
+// Stage 36: identical wire framing to buildReadRequest above, except the
+// last 4 bytes before CRC are (address, value) instead of (address, count)
+// -- the standard Modbus write-single-register (0x06) request PDU embedded
+// in the same proprietary envelope every read request already uses.
+size_t LuxPowerTCP::buildWriteRequest(uint8_t *packet, size_t packetCapacity, uint16_t address, uint16_t value, uint8_t functionCode)
+{
+    if (packetCapacity < PACKET_SIZE)
+    {
+        return 0;
+    }
+
+    size_t pos = 0;
+
+    packet[pos++] = HEADER_A1;
+    packet[pos++] = HEADER_1A;
+    packet[pos++] = PROTOCOL_VERSION;
+    packet[pos++] = 0x00;
+    packet[pos++] = 0x20;
+    packet[pos++] = 0x00;
+    packet[pos++] = 0x01;
+    packet[pos++] = AUX_VALUE;
+
+    if (dongleSerial_ != nullptr)
+    {
+        memcpy(&packet[pos], dongleSerial_, 10);
+    }
+    else
+    {
+        memset(&packet[pos], 0, 10);
+    }
+    pos += 10;
+
+    packet[pos++] = 0x12;
+    packet[pos++] = 0x00;
+
+    packet[pos++] = ACTION_VALUE;
+    packet[pos++] = functionCode;
+
+    if (inverterSerial_ != nullptr)
+    {
+        memcpy(&packet[pos], inverterSerial_, 10);
+    }
+    else
+    {
+        memset(&packet[pos], 0, 10);
+    }
+    pos += 10;
+
+    packet[pos++] = address & 0xFF;
+    packet[pos++] = (address >> 8) & 0xFF;
+    packet[pos++] = value & 0xFF;
+    packet[pos++] = (value >> 8) & 0xFF;
+
+    const uint16_t crc = modbusCrc16(&packet[20], 16);
+    packet[pos++] = crc & 0xFF;
+    packet[pos++] = (crc >> 8) & 0xFF;
+
+    return pos;
+}
+
+// Stage 36: parses a write-single-register (0x06) response. UNLIKE
+// parseRegisterResponse (reads), the standard Modbus 0x06 response echoes
+// exactly [address, value] with no byte-count field -- verified against
+// real hardware during this stage's live validation (see
+// stages/Stage36.md); if a given dongle/firmware combination ever responds
+// differently this will fail closed (returns false / lastError_ set), not
+// silently misread a value, since every field is bounds- and CRC-checked
+// before echoedValue is read.
+bool LuxPowerTCP::parseWriteResponse(const uint8_t *packet, size_t length, uint16_t expectedRegister, uint8_t expectedFunction, uint16_t &echoedValue)
+{
+    if (length < 36)
+    {
+        lastError_ = "Write response too short";
+        luxPowerLogf("Ответ на запись слишком короткий: %u байт\n", static_cast<unsigned int>(length));
+        return false;
+    }
+
+    if (packet[0] != HEADER_A1 || packet[1] != HEADER_1A)
+    {
+        lastError_ = "Write response header invalid";
+        luxPowerLog("Нет заголовка A1 1A в ответе на запись.");
+        return false;
+    }
+
+    const uint16_t frameLength = packet[4] | (static_cast<uint16_t>(packet[5]) << 8);
+    const size_t expectedLength = frameLength + 6;
+
+    if (length < expectedLength || expectedLength < 36)
+    {
+        lastError_ = "Write response incomplete";
+        luxPowerLogf("Неполный ответ на запись: %u из %u байт\n",
+                      static_cast<unsigned int>(length), static_cast<unsigned int>(expectedLength));
+        return false;
+    }
+
+    const uint16_t receivedCrc = packet[expectedLength - 2] | (static_cast<uint16_t>(packet[expectedLength - 1]) << 8);
+    const uint16_t calculatedCrc = modbusCrc16(&packet[20], expectedLength - 22);
+
+    if (receivedCrc != calculatedCrc)
+    {
+        lastError_ = "Write response CRC mismatch";
+        luxPowerLog("Ошибка CRC в ответе на запись.");
+        return false;
+    }
+
+    const uint8_t functionCode = packet[21];
+    if (functionCode != expectedFunction)
+    {
+        lastError_ = "Write response function mismatch";
+        luxPowerLogf("Неожиданная функция в ответе на запись: 0x%02X\n", functionCode);
+        return false;
+    }
+
+    const uint16_t returnedRegister = packet[32] | (static_cast<uint16_t>(packet[33]) << 8);
+    if (returnedRegister != expectedRegister)
+    {
+        lastError_ = "Write response register mismatch";
+        luxPowerLogf("Ответ на запись содержит регистр %u вместо %u\n", returnedRegister, expectedRegister);
+        return false;
+    }
+
+    echoedValue = packet[34] | (static_cast<uint16_t>(packet[35]) << 8);
+    lastError_ = "No error";
+    return true;
+}
+
+// Stage 36: single write-then-wait-for-echo attempt, no internal retry (the
+// "retry once after a communication failure" policy lives one level up, in
+// the Gateway's command dispatcher, which decides whether a failure here
+// was worth retrying at all -- this primitive just reports what happened).
+bool LuxPowerTCP::writeRegisterSingle(uint16_t address, uint16_t value, uint16_t &echoedValue)
+{
+    if (!connect())
+    {
+        lastError_ = "Write: connect failed";
+        return false;
+    }
+
+    consumeUnsolicitedFrames(50);
+
+    uint8_t request[38];
+    const size_t requestLength = buildWriteRequest(request, sizeof(request), address, value, MODBUS_FUNCTION_WRITE_SINGLE);
+    if (requestLength == 0)
+    {
+        lastError_ = "Write: request build failed";
+        disconnect();
+        return false;
+    }
+
+    luxPowerLog("Запрос на запись HEX: ");
+    luxPowerLogHex(request, requestLength);
+
+    const size_t written = transport_.write(request, requestLength);
+    transport_.flush();
+
+    if (written != requestLength)
+    {
+        lastError_ = "Write: short write to socket";
+        luxPowerLogf("Отправлено только %u из %u байт запроса на запись.\n",
+                      static_cast<unsigned int>(written), static_cast<unsigned int>(requestLength));
+        disconnect();
+        return false;
+    }
+
+    uint8_t response[1024];
+    size_t responseLength = 0;
+    const uint32_t overallStartedAt = luxPowerMillis();
+
+    while (luxPowerMillis() - overallStartedAt < MATCHING_RESPONSE_TIMEOUT_MS)
+    {
+        if (!readLuxFrame(response, sizeof(response), responseLength, MATCHING_RESPONSE_TIMEOUT_MS))
+        {
+            continue;
+        }
+
+        if (responseLength < 36)
+        {
+            continue;
+        }
+
+        const uint8_t responseFunctionCode = response[21];
+        const uint16_t returnedRegister = response[32] | (static_cast<uint16_t>(response[33]) << 8);
+
+        if (responseFunctionCode != MODBUS_FUNCTION_WRITE_SINGLE || returnedRegister != address)
+        {
+            luxPowerLog("Это не ответ на запись — пропускаем (потоковая телеметрия или другой ответ).");
+            continue;
+        }
+
+        luxPowerLog("Ответ на запись HEX: ");
+        luxPowerLogHex(response, responseLength);
+
+        const bool result = parseWriteResponse(response, responseLength, address, MODBUS_FUNCTION_WRITE_SINGLE, echoedValue);
+        if (!result)
+        {
+            disconnect();
+        }
+        return result;
+    }
+
+    if (!transport_.connected())
+    {
+        lastError_ = "Write: socket disconnected while waiting for response";
+        disconnect();
+        return false;
+    }
+
+    lastError_ = "Write: response timeout";
+    luxPowerLog("Таймаут ответа на запись.");
+    return false;
+}
+
+LuxPowerTCP::WriteStatus LuxPowerTCP::setMaxBackflowPower(uint8_t percent, uint8_t &previousPercent, uint8_t &readbackPercent)
+{
+    previousPercent = 0;
+    readbackPercent = 0;
+
+    // Force an authoritative, current-as-of-right-now read -- never trust
+    // the passive 30s-interval cache for a write decision (both the
+    // already-set comparison below and the final readback verification
+    // need the real value at this moment, not up to 30s stale).
+    if (!refreshHoldingBlock())
+    {
+        return WriteStatus::CommunicationError;
+    }
+
+    uint16_t currentRaw = 0;
+    if (!cachedHoldingU16(103, currentRaw))
+    {
+        return WriteStatus::CommunicationError;
+    }
+    previousPercent = static_cast<uint8_t>(currentRaw);
+
+    if (previousPercent == percent)
+    {
+        readbackPercent = previousPercent;
+        return WriteStatus::AlreadySet;
+    }
+
+    uint16_t echoedValue = 0;
+    if (!writeRegisterSingle(103, percent, echoedValue) || echoedValue != percent)
+    {
+        return WriteStatus::CommunicationError;
+    }
+
+    if (!refreshHoldingBlock())
+    {
+        return WriteStatus::CommunicationError;
+    }
+
+    uint16_t readbackRaw = 0;
+    if (!cachedHoldingU16(103, readbackRaw))
+    {
+        return WriteStatus::CommunicationError;
+    }
+    readbackPercent = static_cast<uint8_t>(readbackRaw);
+
+    return (readbackPercent == percent) ? WriteStatus::Success : WriteStatus::ReadbackMismatch;
+}
+
+LuxPowerTCP::WriteStatus LuxPowerTCP::setZeroExportEnabled(bool enabled, bool &previousEnabled, bool &readbackEnabled)
+{
+    previousEnabled = false;
+    readbackEnabled = false;
+
+    constexpr uint16_t kZeroExportBitMask = 0x8000U;
+
+    if (!refreshHoldingBlock())
+    {
+        return WriteStatus::CommunicationError;
+    }
+
+    uint16_t currentRaw = 0;
+    if (!cachedHoldingU16(21, currentRaw))
+    {
+        return WriteStatus::CommunicationError;
+    }
+    previousEnabled = (currentRaw & kZeroExportBitMask) != 0;
+
+    if (previousEnabled == enabled)
+    {
+        readbackEnabled = previousEnabled;
+        return WriteStatus::AlreadySet;
+    }
+
+    // Bit-preserving by construction: modifiedRaw starts from the value we
+    // just read, with only bit 15 changed -- every other bit is whatever it
+    // already was, never zeroed or reset.
+    const uint16_t modifiedRaw = enabled ? static_cast<uint16_t>(currentRaw | kZeroExportBitMask)
+                                          : static_cast<uint16_t>(currentRaw & static_cast<uint16_t>(~kZeroExportBitMask));
+
+    uint16_t echoedValue = 0;
+    if (!writeRegisterSingle(21, modifiedRaw, echoedValue) || echoedValue != modifiedRaw)
+    {
+        return WriteStatus::CommunicationError;
+    }
+
+    if (!refreshHoldingBlock())
+    {
+        return WriteStatus::CommunicationError;
+    }
+
+    uint16_t readbackRaw = 0;
+    if (!cachedHoldingU16(21, readbackRaw))
+    {
+        return WriteStatus::CommunicationError;
+    }
+    readbackEnabled = (readbackRaw & kZeroExportBitMask) != 0;
+
+    // Single comparison verifies BOTH required properties at once: bit 15
+    // matches the request, and every other bit is unchanged from the
+    // original currentRaw (since modifiedRaw was derived from currentRaw
+    // with only that one bit touched).
+    return (readbackRaw == modifiedRaw) ? WriteStatus::Success : WriteStatus::ReadbackMismatch;
 }
 
 bool LuxPowerTCP::readLuxFrame(uint8_t *buffer, size_t capacity, size_t &frameLength, uint32_t timeoutMs)

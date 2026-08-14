@@ -21,7 +21,9 @@ enum class LuxPowerMetric : uint8_t
     Pv2Power,
     BatterySoc,
     BatteryChargePower,
-    BatteryDischargePower
+    BatteryDischargePower,
+    MaxBackflowPower,
+    ZeroExportEnabled
 };
 
 struct LuxPowerMetricValue
@@ -72,6 +74,8 @@ public:
 
     bool pv1EnergyTotal(float &kWh) const;
     bool feedInGridEnabled(bool &enabled) const;
+    bool maxBackflowPower(float &percent) const;
+    bool zeroExportEnabled(bool &enabled) const;
     bool pv1Power(float &watts) const;
     bool pv2Power(float &watts) const;
     bool batterySoc(float &percent) const;
@@ -79,6 +83,23 @@ public:
     bool batteryDischargePower(float &watts) const;
     bool metricValue(LuxPowerMetric metric, LuxPowerMetricValue &value) const;
     bool metricDescriptor(LuxPowerMetric metric, LuxPowerMetricDescriptor &descriptor) const;
+
+    // Stage 36: the complete, permanent write allowlist. Callers pass an
+    // already-range-validated value (0-100 for percent) -- these two
+    // methods are the ONLY write paths this library exposes; there is no
+    // writeRegister(address, value) and there will never be one. Each is a
+    // full synchronous read-current -> compare -> write -> read-back ->
+    // verify cycle against the live inverter (network I/O, blocking, same
+    // style as the rest of this library). See stages/Stage36.md.
+    enum class WriteStatus : uint8_t
+    {
+        Success,
+        AlreadySet,
+        CommunicationError,
+        ReadbackMismatch
+    };
+    WriteStatus setMaxBackflowPower(uint8_t percent, uint8_t &previousPercent, uint8_t &readbackPercent);
+    WriteStatus setZeroExportEnabled(bool enabled, bool &previousEnabled, bool &readbackEnabled);
 
     uint16_t lastU16() const;
     uint32_t lastU32() const;
@@ -156,6 +177,13 @@ private:
     bool refreshHoldingBlock();
     bool readRegister(uint16_t address, uint8_t functionCode, uint16_t &value16);
     bool readRegisterU32(uint16_t address, uint8_t functionCode, uint32_t &value32);
+    // Stage 36: low-level write-single-register primitive. Private and
+    // synchronous, same pattern as readRegister above -- never exposed
+    // publicly (see the WriteStatus-returning high-level methods declared
+    // in the public section, which are the only write entry points).
+    size_t buildWriteRequest(uint8_t *packet, size_t packetCapacity, uint16_t address, uint16_t value, uint8_t functionCode);
+    bool parseWriteResponse(const uint8_t *packet, size_t length, uint16_t expectedRegister, uint8_t expectedFunction, uint16_t &echoedValue);
+    bool writeRegisterSingle(uint16_t address, uint16_t value, uint16_t &echoedValue);
 
     LuxPowerTransport &transport_;
 #ifdef ARDUINO
@@ -181,6 +209,7 @@ private:
 
     static constexpr uint8_t MODBUS_FUNCTION_READ_HOLDING = 0x03;
     static constexpr uint8_t MODBUS_FUNCTION_READ_INPUT = 0x04;
+    static constexpr uint8_t MODBUS_FUNCTION_WRITE_SINGLE = 0x06;
     static constexpr uint16_t DEFAULT_TIMEOUT_MS = 3000;
     static constexpr uint16_t MATCHING_RESPONSE_TIMEOUT_MS = 3000;
     static constexpr uint16_t OVERALL_TIMEOUT_MS = 8000;

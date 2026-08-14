@@ -211,7 +211,7 @@
       "device_class": null,
       "state_class": null,
       "icon": "mdi:transmission-tower-export",
-      "status": "PRODUCTION",
+      "status": "UNDER_REVIEW",
       "writable": false,
       "cache_dependency": "holding",
       "validity_rule": "available when holding cache is valid and field is present",
@@ -221,9 +221,10 @@
       "protocol_type": "bool",
       "sources": [
         "LuxPowerRegisters.h / kVerifiedRegisters",
-        "docs/Registers.md"
+        "docs/Registers.md",
+        "stages/Stage35.md (SweetPower-Project-Docs)"
       ],
-      "notes": "Read-only exposure of verified holding bit 15. No writes are allowed in this stage.",
+      "notes": "Stage 35 reconciliation: hardware evidence shows holding register 22 bit 15 does NOT respond to the LuxPower app's Zero Export control (toggled ON then OFF against live Inverter #2 hardware; register 22 stayed at raw value 65 throughout, bit 15 = 0 the entire time). The register that DOES track the app's Zero Export control, exactly and reversibly, is holding register 21 bit 15 -- see zero_export_enabled. Upstream reference (ant0nkr/luxpower-ha-integration) documents register 22 as PV start voltage (0.1V units, range 900-5000) with no bit-15 flag at all, and records a prior incident where writing bit 15 of register 22 corrupted the PV start voltage instead of toggling grid export. Register 22's observed raw value (65 = 6.5V) is also outside that documented voltage range, though this alone does not prove what register 22 represents on this specific hardware/firmware. Most likely an incorrect register-address mapping (probably should have been register 21), but an unrelated/undocumented function on this exact inverter cannot be fully ruled out from read-only evidence alone. Not deprecated -- still generated/transported/displayed per policy -- pending further investigation. See stages/Stage35.md in SweetPower-Project-Docs for the full evidence log.",
       "update_class": "NORMAL"
     },
     {
@@ -2842,6 +2843,69 @@
         "Stage 31: wired via new ESP-LUXPOWER input block 2 (registers 125..249, register 170 = I_PLOAD)"
       ],
       "notes": "Direct U16 input register 170 (I_PLOAD), load consumption when working in on-grid mode per upstream register comment. Outside the original 0..124 poll block; Stage 31 added a second contiguous 125-register input block (125..249) specifically to reach this register for FAST-class telemetry, at the cost of one additional Modbus request per ~1s poll cycle. Promoted from NOT_WIRED candidate to PRODUCTION under the Stage 28 policy."
+    },
+    {
+      "key": "max_backflow_power",
+      "name": "Max Backflow Power",
+      "category": "Status",
+      "area": "holding",
+      "address": 103,
+      "register_count": 1,
+      "raw_type": "uint16",
+      "word_order": "single",
+      "scale": 1.0,
+      "offset": 0.0,
+      "unit": "%",
+      "accuracy_decimals": 0,
+      "device_class": null,
+      "state_class": "measurement",
+      "icon": "mdi:transmission-tower-export",
+      "status": "PRODUCTION",
+      "writable": false,
+      "cache_dependency": "holding",
+      "validity_rule": "available when holding cache is valid and field is present",
+      "protocol_field_id": 7002,
+      "protocol_group": "STATUS",
+      "protocol_scale": 1,
+      "protocol_type": "int32",
+      "sources": [
+        "stages/Stage35.md (SweetPower-Project-Docs)",
+        "ant0nkr/luxpower-ha-integration (H_MAX_BACKFLOW_POWER = 103, upstream hypothesis, hardware-confirmed this stage)"
+      ],
+      "notes": "Experimentally confirmed Stage 35: raw value tracked the LuxPower app's Max Backflow Power percentage exactly across four distinct values (0, 70, 30, 50) and an exact restoration to the original value (0), with no other holding register affected. Read-only exposure; no Modbus write function code exists anywhere in this project's LuxPowerTCP library.",
+      "update_class": "NORMAL"
+    },
+    {
+      "key": "zero_export_enabled",
+      "name": "Zero Export",
+      "category": "Status",
+      "area": "holding",
+      "address": 21,
+      "bit": 15,
+      "register_count": 1,
+      "raw_type": "bit",
+      "word_order": "single",
+      "scale": 1.0,
+      "offset": 0.0,
+      "unit": "",
+      "accuracy_decimals": 0,
+      "device_class": null,
+      "state_class": null,
+      "icon": "mdi:transmission-tower-off",
+      "status": "PRODUCTION",
+      "writable": false,
+      "cache_dependency": "holding",
+      "validity_rule": "available when holding cache is valid and field is present",
+      "protocol_field_id": 7003,
+      "protocol_group": "STATUS",
+      "protocol_scale": 1,
+      "protocol_type": "bool",
+      "sources": [
+        "stages/Stage35.md (SweetPower-Project-Docs)",
+        "ant0nkr/luxpower-ha-integration (calls this register/bit \"Grid Export\", H_FUNCTION_ENABLE_1 bit 15)"
+      ],
+      "notes": "Experimentally confirmed Stage 35: holding register 21 bit 15 flipped exactly and predictably with the LuxPower app's Zero Export control (OFF -> ON -> OFF), returning to the exact original raw value, with no other holding register affected. NOT the same register the upstream integration labels \"Fast Zero Export\" (holding register 110 bit 1), which did not respond to this app control at all. Also not the same register as this project's existing feed_in_grid_enabled entity (holding register 22 bit 15), which also did not respond -- see that entity's notes. Read-only exposure; no Modbus write function code exists anywhere in this project's LuxPowerTCP library.",
+      "update_class": "NORMAL"
     }
   ],
   "candidates": [],
@@ -2849,10 +2913,10 @@
     {
       "key": "feed_in_grid_enabled_control",
       "semantic_intent": "Enable or disable feed-in to grid",
-      "source": "holding register 22 bit 15",
+      "source": "holding register 21 bit 15 (corrected Stage 35 -- see feed_in_grid_enabled reconciliation)",
       "required_range_or_enum": "boolean",
       "verification_status": "CONTROL_CANDIDATE",
-      "safety_constraints": "Must be implemented as a semantic write with read-back verification, explicit user confirmation, inverter state checks, and rollback/error handling.",
+      "safety_constraints": "Must be implemented as a semantic write with read-back verification, explicit user confirmation, inverter state checks, and rollback/error handling. Stage 35 reconciliation: this control's original source (holding register 22 bit 15, matching the old feed_in_grid_enabled read mapping) did not respond to the app's Zero Export control during live hardware testing and is now UNDER_REVIEW as a read entity -- do not target register 22 bit 15 for any future write. The upstream reference separately documents a historical incident where writing that exact bit corrupted the PV start voltage instead of toggling grid export. Target register 21 bit 15 (zero_export_enabled) instead, and re-verify with a read-back test before any write path is implemented.",
       "exposed_in_stage_22a": false
     }
   ]

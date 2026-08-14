@@ -35,7 +35,14 @@ enum class LuxPowerRegisterId : uint8_t
     Pv2Power,
     BatterySoc,
     BatteryChargePower,
-    BatteryDischargePower
+    BatteryDischargePower,
+    // Stage 35: experimentally confirmed via live diagnostic-mode discovery
+    // on Inverter #2 (see stages/Stage35.md) -- holding register 103 (Max
+    // Backflow Power, raw == percent) and holding register 21 bit 15 (Zero
+    // Export). Neither has any relation to FeedInGridEnabled's register 22,
+    // which failed the same discovery session's Zero Export test.
+    MaxBackflowPower,
+    ZeroExportEnabled
 };
 
 bool luxPowerRegisterDescriptor(LuxPowerRegisterId id, LuxPowerRegisterDescriptor &descriptor);
