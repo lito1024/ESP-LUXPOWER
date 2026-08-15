@@ -209,6 +209,18 @@ SUPPLEMENTAL_PROTOCOL_ENTITIES = [
         "protocol_type": "bool",
         "update_class": "FAST",
     },
+    {
+        "key": "display_maintenance_wifi_actual",
+        "name": "Display Maintenance Wi-Fi Actual",
+        "unit": "",
+        "accuracy_decimals": 0,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 12001,
+        "protocol_group": "STATUS",
+        "protocol_scale": 1,
+        "protocol_type": "bool",
+        "update_class": "FAST",
+    },
 ]
 
 # Stage 31: catalog-driven telemetry scheduling. Every production entity
@@ -714,7 +726,7 @@ def render_protocol_v2(catalog: dict) -> str:
             "",
             markdown_table(
                 [
-                    ["0", "1", "device_id", "Source identity: `1` inverter 1, `2` inverter 2, `3` Controller/system, `4` Garage Sensor"],
+                    ["0", "1", "device_id", "Source identity: `1` inverter 1, `2` inverter 2, `3` Controller/system, `4` Garage Sensor, `5` Display"],
                     ["1", "1", "group_id", "1 fast, 2 energy, 3 status, 4 diagnostics"],
                     ["2", "1", "field_count", "number of following field records"],
                     ["3", "2", "group_flags", "bit 0 = group values valid, bit 1 = cache valid"],
