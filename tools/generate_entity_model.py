@@ -198,6 +198,34 @@ SUPPLEMENTAL_PROTOCOL_ENTITIES = [
         "update_class": "FAST",
     },
     {
+        "key": "display_maintenance_wifi_enabled",
+        "name": "Display Maintenance Wi-Fi Enabled",
+        "unit": "",
+        "accuracy_decimals": 0,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10015,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 1,
+        "protocol_type": "bool",
+        "update_class": "FAST",
+    },
+    {
+        # Stage 44H (ESP-TELEMETRY caae950): was hand-added to the generated
+        # header/ProtocolV2.md without this source entry; restored here
+        # (Stage 48H-A0) with the exact approved definition so regeneration
+        # no longer drops it.
+        "key": "home_assistant_connected",
+        "name": "Home Assistant Connected",
+        "unit": "",
+        "accuracy_decimals": 0,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10016,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 1,
+        "protocol_type": "bool",
+        "update_class": "FAST",
+    },
+    {
         "key": "garage_presence",
         "name": "Garage Presence",
         "unit": "",

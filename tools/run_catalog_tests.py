@@ -6,7 +6,11 @@ bypasses the generator.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
+import re
+import subprocess
+import sys
 from pathlib import Path
 
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "data" / "luxpower_entities.json"
@@ -84,6 +88,65 @@ def test_power_to_grid_and_power_from_grid_are_fast_telemetry_group() -> None:
     assert by_key["power_from_grid"]["protocol_field_id"] == 9004
 
 
+# ---------------------------------------------------------------- Stage 48H-A0
+# Generator <-> generated-catalog synchronization. FieldId 10016 was once
+# hand-added to the generated ESPTelemetryFields.h without a source entry,
+# so a later regeneration would have silently deleted it. These checks make
+# that failure mode loud.
+
+GENERATOR_PATH = Path(__file__).resolve().parent / "generate_entity_model.py"
+PROTOCOL_HEADER = Path(r"C:\Projects\ESP\ESP-TELEMETRY\src\ESPTelemetryFields.h")
+
+
+def load_generator():
+    spec = importlib.util.spec_from_file_location("generate_entity_model", GENERATOR_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def source_field_ids() -> dict[int, str]:
+    gen = load_generator()
+    catalog = gen.load_catalog(CATALOG_PATH)
+    return {int(e["protocol_field_id"]): e["key"] for e in gen.protocol_entities(catalog)}
+
+
+def test_source_field_ids_are_unique() -> None:
+    gen = load_generator()
+    ids = [int(e["protocol_field_id"]) for e in gen.protocol_entities(gen.load_catalog(CATALOG_PATH))]
+    assert len(ids) == len(set(ids)), "duplicate protocol_field_id in the generator source"
+
+
+def test_every_generated_field_id_exists_in_the_source() -> None:
+    # General check (not specific to 10016): the generated protocol header
+    # must contain exactly the FieldIds that the generator source defines --
+    # nothing hand-added, nothing missing.
+    if not PROTOCOL_HEADER.is_file():
+        print("  (skipped: ESP-TELEMETRY checkout not found)")
+        return
+    header = PROTOCOL_HEADER.read_text(encoding="utf-8")
+    generated = {int(n) for n in re.findall(r"^\s*FieldId\w+\s*=\s*(\d+),", header, re.MULTILINE)}
+    source = set(source_field_ids())
+    assert generated, "no FieldIds parsed from the generated header"
+    hand_added = sorted(generated - source)
+    missing = sorted(source - generated)
+    assert not hand_added, f"FieldIds in generated header but not in generator source: {hand_added}"
+    assert not missing, f"FieldIds in generator source but not in generated header: {missing}"
+
+
+def test_generator_check_mode_passes() -> None:
+    # The project's synchronization gate: every generated artifact
+    # (ESP-TELEMETRY, gateway, display, LuxPower docs) equals what the
+    # source would generate.
+    if not PROTOCOL_HEADER.is_file():
+        print("  (skipped: sibling checkouts not found)")
+        return
+    result = subprocess.run(
+        [sys.executable, str(GENERATOR_PATH), "--check"], capture_output=True, text=True
+    )
+    assert result.returncode == 0, "generator --check failed: " + result.stdout + result.stderr
+
+
 def main() -> int:
     tests = [
         test_every_entity_has_exactly_one_valid_update_class,
@@ -92,6 +155,9 @@ def main() -> int:
         test_no_duplicate_keys_or_field_ids,
         test_load_power_present_fast_and_reachable_via_block2,
         test_power_to_grid_and_power_from_grid_are_fast_telemetry_group,
+        test_source_field_ids_are_unique,
+        test_every_generated_field_id_exists_in_the_source,
+        test_generator_check_mode_passes,
     ]
     for test in tests:
         test()
