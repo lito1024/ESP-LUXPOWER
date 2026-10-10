@@ -249,6 +249,22 @@ SUPPLEMENTAL_PROTOCOL_ENTITIES = [
         "protocol_type": "bool",
         "update_class": "FAST",
     },
+    {
+        # Stage 48H-A1: SweetPower Distribution Node (device_id 7, FieldId
+        # range 14001-14999). V0 = Grid Source Voltage: raw external grid
+        # upstream of the grid contactor, the node's calibrated production
+        # sensor. Same representation as grid_raw_voltage (10013, V2).
+        "key": "grid_source_voltage",
+        "name": "Grid Source Voltage",
+        "unit": "V",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 14001,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
 ]
 
 # Stage 31: catalog-driven telemetry scheduling. Every production entity
