@@ -226,6 +226,34 @@ SUPPLEMENTAL_PROTOCOL_ENTITIES = [
         "update_class": "FAST",
     },
     {
+        # Display 3A: Controller V3 (Quant9 output, before EARU #1, K3) and V1
+        # (Elex output, after K-ELEX) forwarded to the Display so it can show which
+        # stabilizer is feeding the system. Diagnostic voltages only: no AC-present
+        # threshold is implied (Stage 48L is still discovery).
+        "key": "quant9_output_voltage",
+        "name": "Quant9 Output Voltage",
+        "unit": "V",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10023,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
+        "key": "elex_output_voltage",
+        "name": "Elex Output Voltage",
+        "unit": "V",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 10024,
+        "protocol_group": "FAST_TELEMETRY",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "FAST",
+    },
+    {
         "key": "garage_presence",
         "name": "Garage Presence",
         "unit": "",
@@ -397,6 +425,57 @@ SUPPLEMENTAL_PROTOCOL_ENTITIES = [
         "protocol_scale": 100,
         "protocol_type": "int32",
         "update_class": "FAST",
+    },
+    {
+        # Display 3A: oil-change counters kept by the Generator Node (device 6).
+        # Hours run since the last oil change and the change interval, per
+        # generator; counted while the meter replies (generator running).
+        "key": "ks_oil_hours",
+        "name": "KS Oil Hours",
+        "unit": "h",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 13013,
+        "protocol_group": "ENERGY_TOTALS",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "SLOW",
+    },
+    {
+        "key": "ks_oil_interval",
+        "name": "KS Oil Change Interval",
+        "unit": "h",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 13014,
+        "protocol_group": "ENERGY_TOTALS",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "SLOW",
+    },
+    {
+        "key": "zegor_oil_hours",
+        "name": "Zegor Oil Hours",
+        "unit": "h",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 13015,
+        "protocol_group": "ENERGY_TOTALS",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "SLOW",
+    },
+    {
+        "key": "zegor_oil_interval",
+        "name": "Zegor Oil Change Interval",
+        "unit": "h",
+        "accuracy_decimals": 1,
+        "status": STATUS_PRODUCTION,
+        "protocol_field_id": 13016,
+        "protocol_group": "ENERGY_TOTALS",
+        "protocol_scale": 10,
+        "protocol_type": "int32",
+        "update_class": "SLOW",
     },
     {
         # Stage 48H-A1: SweetPower Distribution Node (device_id 7, FieldId
