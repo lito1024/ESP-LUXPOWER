@@ -95,7 +95,8 @@ def test_power_to_grid_and_power_from_grid_are_fast_telemetry_group() -> None:
 # that failure mode loud.
 
 GENERATOR_PATH = Path(__file__).resolve().parent / "generate_entity_model.py"
-PROTOCOL_HEADER = Path(r"C:\Projects\ESP\ESP-TELEMETRY\src\ESPTelemetryFields.h")
+# ESP-030: sibling workspace repo (C:\Projects is a read-only archive now).
+PROTOCOL_HEADER = Path(__file__).resolve().parents[2] / "ESP-TELEMETRY" / "src" / "ESPTelemetryFields.h"
 
 
 def load_generator():

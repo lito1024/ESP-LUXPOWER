@@ -113,6 +113,11 @@ public:
     uint32_t inputBlock2CacheAge() const;
     bool holdingCacheValid() const;
     uint32_t holdingCacheAge() const;
+    // ESP-030: second holding block (registers 125..249), read-only, added to
+    // reach the AC charge current (holding 168). Independent validity/age
+    // from the primary 0..124 holding block; polled at the holding interval.
+    bool holdingBlock2CacheValid() const;
+    uint32_t holdingBlock2CacheAge() const;
     bool cachedInputU16(uint16_t address, uint16_t &value) const;
     bool cachedInputU32(uint16_t address, uint32_t &value) const;
     bool cachedHoldingU16(uint16_t address, uint16_t &value) const;
@@ -133,17 +138,21 @@ private:
     static constexpr uint16_t kInputBlock2Size = 125;
     static constexpr uint16_t kInputTotalSize = kInputBlock1Size + kInputBlock2Size;
     static constexpr uint16_t kHoldingSize = 125;
+    static constexpr uint16_t kHoldingBlock2Size = 125;
 
     struct RegisterCache
     {
         uint16_t input[kInputTotalSize]{};
         uint16_t holding[kHoldingSize]{};
+        uint16_t holdingBlock2[kHoldingBlock2Size]{};
         bool inputValid = false;
         bool inputBlock2Valid = false;
         bool holdingValid = false;
+        bool holdingBlock2Valid = false;
         uint32_t inputUpdated = 0;
         uint32_t inputBlock2Updated = 0;
         uint32_t holdingUpdated = 0;
+        uint32_t holdingBlock2Updated = 0;
 
         void clear()
         {
@@ -155,13 +164,19 @@ private:
             {
                 holding[i] = 0;
             }
+            for (size_t i = 0; i < sizeof(holdingBlock2) / sizeof(holdingBlock2[0]); ++i)
+            {
+                holdingBlock2[i] = 0;
+            }
 
             inputValid = false;
             inputBlock2Valid = false;
             holdingValid = false;
+            holdingBlock2Valid = false;
             inputUpdated = 0;
             inputBlock2Updated = 0;
             holdingUpdated = 0;
+            holdingBlock2Updated = 0;
         }
     };
 
@@ -175,6 +190,7 @@ private:
     bool refreshInputBlock();
     bool refreshInputBlock2();
     bool refreshHoldingBlock();
+    bool refreshHoldingBlock2();
     bool readRegister(uint16_t address, uint8_t functionCode, uint16_t &value16);
     bool readRegisterU32(uint16_t address, uint8_t functionCode, uint32_t &value32);
     // Stage 36: low-level write-single-register primitive. Private and

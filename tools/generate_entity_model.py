@@ -1075,9 +1075,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="fail if generated files are stale")
     parser.add_argument("--luxpower-root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--protocol-root", type=Path, default=Path(r"C:\\Projects\\ESP\\ESP-TELEMETRY"))
-    parser.add_argument("--gateway-root", type=Path, default=Path(r"C:\Projects\ESP\luxpower-gateway"))
-    parser.add_argument("--display-root", type=Path, default=Path(r"C:\Projects\ESP\sweet-power-display"))
+    # ESP-030: defaults are the sibling workspace repos (C:\Projects is a
+    # read-only archive now).
+    workspace = Path(__file__).resolve().parents[2]
+    parser.add_argument("--protocol-root", type=Path, default=workspace / "ESP-TELEMETRY")
+    parser.add_argument("--gateway-root", type=Path, default=workspace / "luxpower-gateway")
+    parser.add_argument("--display-root", type=Path, default=workspace / "sweet-power-display")
     args = parser.parse_args()
 
     catalog_path = args.luxpower_root / "data" / "luxpower_entities.json"

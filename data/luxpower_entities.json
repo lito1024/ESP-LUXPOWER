@@ -2906,6 +2906,37 @@
       ],
       "notes": "Experimentally confirmed Stage 35: holding register 21 bit 15 flipped exactly and predictably with the LuxPower app's Zero Export control (OFF -> ON -> OFF), returning to the exact original raw value, with no other holding register affected. NOT the same register the upstream integration labels \"Fast Zero Export\" (holding register 110 bit 1), which did not respond to this app control at all. Also not the same register as this project's existing feed_in_grid_enabled entity (holding register 22 bit 15), which also did not respond -- see that entity's notes. Read-only exposure; no Modbus write function code exists anywhere in this project's LuxPowerTCP library.",
       "update_class": "NORMAL"
+    },
+    {
+      "key": "ac_charge_current_from_grid",
+      "name": "AC Charge Current",
+      "category": "Status",
+      "area": "holding",
+      "address": 168,
+      "register_count": 1,
+      "raw_type": "uint16",
+      "word_order": "single",
+      "scale": 1.0,
+      "offset": 0.0,
+      "unit": "A",
+      "accuracy_decimals": 0,
+      "device_class": "current",
+      "state_class": "measurement",
+      "icon": "mdi:transmission-tower-import",
+      "status": "UNDER_REVIEW",
+      "writable": false,
+      "cache_dependency": "holding_block2",
+      "validity_rule": "available when holding block 2 (125..249) cache is valid and field is present",
+      "protocol_field_id": 7004,
+      "protocol_group": "STATUS",
+      "protocol_scale": 1,
+      "protocol_type": "int32",
+      "sources": [
+        "lxp_modbus 0.2.4 hold_registers.py H_AC_CHARGE_BAT_CURRENT = 168 (A, 0-140; upstream, not project-verified)",
+        "agents/ha-programmer HA-059: number.lxp_ac_charge_current_from_grid / lxp2_..._ac_charge_current_from_grid = 10 A on both, 2026-11-02"
+      ],
+      "notes": "ESP-030 phase 1: charge-from-grid current limit, read-only via the new holding block 2 (125..249). UNDER_REVIEW until the raw value is confirmed against lxp_modbus (10 A on both inverters) on hardware; only then may a SetAcChargeCurrent command (0-40 A, owner 2026-11-02) be built on it.",
+      "update_class": "NORMAL"
     }
   ],
   "candidates": [],

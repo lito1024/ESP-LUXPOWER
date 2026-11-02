@@ -745,13 +745,40 @@ uint32_t LuxPowerTCP::inputBlock2CacheAge() const
 
 bool LuxPowerTCP::cachedHoldingU16(uint16_t address, uint16_t &value) const
 {
-    if (!cache_.holdingValid || address >= 125)
+    if (address < kHoldingSize)
     {
-        return false;
+        if (!cache_.holdingValid)
+        {
+            return false;
+        }
+
+        value = cache_.holding[address];
+        return true;
     }
 
-    value = cache_.holding[address];
-    return true;
+    // ESP-030: holding block 2 (125..249), own validity.
+    if (address < kHoldingSize + kHoldingBlock2Size && cache_.holdingBlock2Valid)
+    {
+        value = cache_.holdingBlock2[address - kHoldingSize];
+        return true;
+    }
+
+    return false;
+}
+
+bool LuxPowerTCP::holdingBlock2CacheValid() const
+{
+    return cache_.holdingBlock2Valid;
+}
+
+uint32_t LuxPowerTCP::holdingBlock2CacheAge() const
+{
+    if (!cache_.holdingBlock2Valid)
+    {
+        return 0;
+    }
+
+    return luxPowerMillis() - cache_.holdingBlock2Updated;
 }
 
 bool LuxPowerTCP::cachedHoldingU32(uint16_t address, uint32_t &value) const
@@ -2193,6 +2220,155 @@ bool LuxPowerTCP::refreshInputBlock2()
     return false;
 }
 
+bool LuxPowerTCP::refreshHoldingBlock2()
+{
+    if (!connect())
+    {
+        return false;
+    }
+
+    consumeUnsolicitedFrames(50);
+
+    uint8_t request[38];
+    const size_t requestLength = buildReadRequest(request, sizeof(request), kHoldingSize, kHoldingBlock2Size, MODBUS_FUNCTION_READ_HOLDING);
+
+    if (requestLength == 0)
+    {
+        luxPowerLog("Ошибка формирования запроса (holding block 2).");
+        disconnect();
+        return false;
+    }
+
+    luxPowerLog("Запрос HEX (holding block 2): ");
+    luxPowerLogHex(request, requestLength);
+
+    const size_t written = transport_.write(request, requestLength);
+    transport_.flush();
+
+    if (written != requestLength)
+    {
+        luxPowerLogf("Отправлено только %u из %u байт (holding block 2).\n",
+                      static_cast<unsigned int>(written),
+                      static_cast<unsigned int>(requestLength));
+        disconnect();
+        return false;
+    }
+
+    uint8_t response[1024];
+    size_t responseLength = 0;
+
+    const uint32_t overallStartedAt = luxPowerMillis();
+
+    while (luxPowerMillis() - overallStartedAt < MATCHING_RESPONSE_TIMEOUT_MS)
+    {
+        if (!readLuxFrame(response, sizeof(response), responseLength, MATCHING_RESPONSE_TIMEOUT_MS))
+        {
+            continue;
+        }
+
+        luxPowerLogf("Получен полный пакет (holding block 2): %u байт\n", static_cast<unsigned int>(responseLength));
+
+        if (responseLength < 36)
+        {
+            luxPowerLog("Пакет слишком короткий (holding block 2), пропускаем.");
+            continue;
+        }
+
+        const uint8_t protocol = response[2];
+        const uint8_t action = response[20];
+        const uint8_t responseFunctionCode = response[21];
+        const uint16_t returnedRegister = response[32] | (static_cast<uint16_t>(response[33]) << 8);
+
+        luxPowerLogf("Пакет (holding block 2): protocol=%u, action=%u, function=0x%02X, register=%u\n",
+                      protocol, action, responseFunctionCode, returnedRegister);
+
+        if (responseFunctionCode != MODBUS_FUNCTION_READ_HOLDING || returnedRegister != kHoldingSize)
+        {
+            luxPowerLog("Это потоковая телеметрия или другой ответ (holding block 2) — пропускаем.");
+            continue;
+        }
+
+        luxPowerLog("Нужный ответ HEX (holding block 2): ");
+        luxPowerLogHex(response, responseLength);
+
+        const uint16_t frameLength =
+            response[4] |
+            (static_cast<uint16_t>(response[5]) << 8);
+
+        const size_t expectedLength = frameLength + 6;
+
+        if (responseLength < expectedLength)
+        {
+            luxPowerLogf("Неполный пакет (holding block 2): %u из %u байт\n",
+                          static_cast<unsigned int>(responseLength),
+                          static_cast<unsigned int>(expectedLength));
+            disconnect();
+            return false;
+        }
+
+        const uint16_t receivedCrc =
+            response[expectedLength - 2] |
+            (static_cast<uint16_t>(response[expectedLength - 1]) << 8);
+
+        const uint16_t calculatedCrc = modbusCrc16(&response[20], expectedLength - 22);
+
+        luxPowerLogf("CRC (holding block 2): получен 0x%04X, рассчитан 0x%04X\n", receivedCrc, calculatedCrc);
+
+        if (receivedCrc != calculatedCrc)
+        {
+            luxPowerLog("Ошибка CRC (holding block 2).");
+            disconnect();
+            return false;
+        }
+
+        const uint8_t byteCount = response[34];
+
+        if (byteCount != kHoldingBlock2Size * 2)
+        {
+            luxPowerLogf("Недостаточно данных (holding block 2): %u байт\n", byteCount);
+            disconnect();
+            return false;
+        }
+
+        for (size_t index = 0; index < kHoldingBlock2Size; ++index)
+        {
+            const size_t offset = 35 + (index * 2);
+            cache_.holdingBlock2[index] = response[offset] | (static_cast<uint16_t>(response[offset + 1]) << 8);
+        }
+
+        cache_.holdingBlock2Valid = true;
+        cache_.holdingBlock2Updated = luxPowerMillis();
+        consecutiveResponseTimeouts_ = 0;
+        lastError_ = "No error";
+        return true;
+    }
+
+    if (!transport_.connected())
+    {
+        lastError_ = "Socket disconnected during refresh (holding block 2)";
+        luxPowerLog("Сокет отключился во время ожидания ответа (holding block 2).");
+        disconnect();
+        return false;
+    }
+
+    consecutiveResponseTimeouts_ += 1;
+    if (consecutiveResponseTimeouts_ >= 3)
+    {
+        lastError_ = "3 consecutive response timeouts";
+        luxPowerLogf("Таймаут ответа (holding block 2) #%u/3; отключаю сокет и требую переподключения.\n",
+                      static_cast<unsigned int>(consecutiveResponseTimeouts_));
+        disconnect();
+    }
+    else
+    {
+        lastError_ = "Response timeout";
+        luxPowerLogf("Таймаут ответа (holding block 2) #%u/3; держу сокет открытым.\n",
+                      static_cast<unsigned int>(consecutiveResponseTimeouts_));
+    }
+
+    return false;
+}
+
 bool LuxPowerTCP::poll()
 {
     const uint32_t now = luxPowerMillis();
@@ -2200,8 +2376,10 @@ bool LuxPowerTCP::poll()
     const bool inputBlock2Due =
         !cache_.inputBlock2Valid || (now - cache_.inputBlock2Updated) >= inputBlock2PollInterval_;
     const bool holdingDue = !cache_.holdingValid || (now - cache_.holdingUpdated) >= holdingPollInterval_;
+    const bool holdingBlock2Due =
+        !cache_.holdingBlock2Valid || (now - cache_.holdingBlock2Updated) >= holdingPollInterval_;
 
-    if (!inputDue && !inputBlock2Due && !holdingDue)
+    if (!inputDue && !inputBlock2Due && !holdingDue && !holdingBlock2Due)
     {
         return false;
     }
@@ -2221,7 +2399,14 @@ bool LuxPowerTCP::poll()
         return refreshInputBlock2();
     }
 
-    return refreshHoldingBlock();
+    // ESP-030: holding block 2 last -- same interval as holding block 1,
+    // one extra round trip per holding interval.
+    if (holdingDue)
+    {
+        return refreshHoldingBlock();
+    }
+
+    return refreshHoldingBlock2();
 }
 
 void LuxPowerTCP::setInputPollInterval(uint32_t intervalMs)
