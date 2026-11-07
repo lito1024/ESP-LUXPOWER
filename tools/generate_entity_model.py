@@ -764,6 +764,65 @@ def render_verified_catalog(catalog: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ESP-038 (D-020): checks made on our own inverters, beyond the catalog
+# status. Rows 1-7 are the former hand-kept docs/Registers.md; 21/103 by the
+# Stage 36 write + read-back, 168 by the ESP-030 read (10 A on both, = app).
+SITE_CHECKS = {
+    "pv1_energy_total": "current LuxPower logs; previous working parser; Home Assistant value",
+    "feed_in_grid_enabled": "holding 22 read; bit 15 interpretation; current inverter state (Stage 35: under review)",
+    "pv1_power": "Stage 12B real-inverter comparison with Home Assistant",
+    "pv2_power": "Stage 12B real-inverter comparison with Home Assistant",
+    "battery_soc": "Stage 12B real-inverter comparison with Home Assistant",
+    "battery_charge_power": "Stage 12B real-inverter comparison with Home Assistant",
+    "battery_discharge_power": "Stage 12B real-inverter comparison with Home Assistant",
+    "zero_export_enabled": "Stage 36 write + read-back on LXP1",
+    "max_backflow_power": "Stage 36 write + read-back on LXP1",
+    "ac_charge_current_from_grid": "ESP-030 read on LXP1 and LXP2 (10 A, matches the app)",
+}
+
+
+def render_registers(catalog: dict) -> str:
+    entities = [e for e in active_entities(catalog) if e["area"] in {"input", "holding"}]
+    entities.sort(key=lambda e: (e["area"] != "input", e["address"], e.get("bit") or 0))
+    lines = [f"<!-- {HEADER} -->", "# LuxPower Register Database", ""]
+    lines.append(
+        "Generated from `data/luxpower_entities.json` (the canonical catalog, Stage 28) by "
+        "`tools/generate_entity_model.py`. Edit the catalog, never this file. lxp_modbus and the "
+        "upstream integration are references only (D-020). \"Checked on site\" lists the checks made on "
+        "our own inverters; an empty cell means catalog/upstream knowledge only. Derived values are in "
+        "`docs/VerifiedEntityCatalog.md`."
+    )
+    lines.append("")
+    rows = []
+    for e in entities:
+        rows.append(
+            [
+                e["area"],
+                e["address"],
+                "" if e.get("bit") is None else e["bit"],
+                e["raw_type"],
+                e["scale"],
+                e["unit"],
+                e["key"],
+                e["name"],
+                e["status"],
+                e.get("protocol_field_id"),
+                e["update_class"],
+                SITE_CHECKS.get(e["key"], ""),
+            ]
+        )
+    lines.append(
+        markdown_table(
+            rows,
+            ["Space", "Address", "Bit", "Type", "Scale", "Unit", "Key", "Name", "Status", "Field ID",
+             "Update class", "Checked on site"],
+        )
+    )
+    lines.extend(["", f"{len(entities)} registers ({sum(e['area'] == 'input' for e in entities)} input, "
+                      f"{sum(e['area'] == 'holding' for e in entities)} holding)."])
+    return "\n".join(lines) + "\n"
+
+
 def render_future_controls(catalog: dict) -> str:
     lines = [f"<!-- {HEADER} -->", "# Future Control Entities", ""]
     lines.append("Controls are documentation-only and are not exposed to ESPHome or UART.")
@@ -1093,6 +1152,7 @@ def main() -> int:
 
     outputs = {
         args.luxpower_root / "docs" / "VerifiedEntityCatalog.md": render_verified_catalog(catalog),
+        args.luxpower_root / "docs" / "Registers.md": render_registers(catalog),
         args.luxpower_root / "docs" / "FutureControlEntities.md": render_future_controls(catalog),
         args.protocol_root / "src" / "ESPTelemetryFields.h": render_protocol_fields_h(catalog),
         args.protocol_root / "docs" / "ProtocolV2.md": render_protocol_v2(catalog),
