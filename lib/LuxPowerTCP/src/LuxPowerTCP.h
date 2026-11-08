@@ -128,6 +128,20 @@ public:
     bool cachedInputU32(uint16_t address, uint32_t &value) const;
     bool cachedHoldingU16(uint16_t address, uint16_t &value) const;
     bool cachedHoldingU32(uint16_t address, uint32_t &value) const;
+    // ESP-038 E (D-020): optional extra input block beyond 0..249 (for
+    // example 250..374), read-only, lowest poll priority, own interval.
+    // Disabled (count 0) by default. A failed read never counts towards the
+    // 3-timeout socket drop and is retried no sooner than kExtraInputRetryMs,
+    // so a range the inverter does not answer costs one timeout per retry.
+    static constexpr uint16_t kExtraInputMaxSize = 125;
+    static constexpr uint32_t kExtraInputRetryMs = 900000;
+    bool setExtraInputBlock(uint16_t start, uint16_t count, uint32_t intervalMs);
+    uint16_t extraInputStart() const;
+    uint16_t extraInputCount() const;
+    bool extraInputCacheValid() const;
+    uint32_t extraInputCacheAge() const;
+    uint32_t extraInputFailures() const;
+    bool cachedExtraInputU16(uint16_t address, uint16_t &value) const;
 #ifdef ARDUINO
     void dumpInputRegisters(Stream &out) const;
     void dumpHoldingRegisters(Stream &out) const;
@@ -197,6 +211,7 @@ private:
     bool refreshInputBlock2();
     bool refreshHoldingBlock();
     bool refreshHoldingBlock2();
+    bool refreshExtraInputBlock();
     bool readRegister(uint16_t address, uint8_t functionCode, uint16_t &value16);
     bool readRegisterU32(uint16_t address, uint8_t functionCode, uint32_t &value32);
     // Stage 36: low-level write-single-register primitive. Private and
@@ -228,6 +243,16 @@ private:
     uint32_t holdingPollInterval_;
     uint32_t lastConnectAttemptMs_;
     uint8_t consecutiveResponseTimeouts_;
+    uint16_t extraInput_[kExtraInputMaxSize]{};
+    uint16_t extraInputStart_ = 0;
+    uint16_t extraInputCount_ = 0;
+    uint32_t extraInputInterval_ = 0;
+    uint32_t extraInputLastAttemptMs_ = 0;
+    uint32_t extraInputUpdated_ = 0;
+    uint32_t extraInputFailures_ = 0;
+    bool extraInputAttempted_ = false;
+    bool extraInputLastOk_ = false;
+    bool extraInputValid_ = false;
 
     static constexpr uint8_t MODBUS_FUNCTION_READ_HOLDING = 0x03;
     static constexpr uint8_t MODBUS_FUNCTION_READ_INPUT = 0x04;

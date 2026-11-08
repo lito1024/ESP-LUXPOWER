@@ -346,6 +346,127 @@ static void test_ac_charge_writes_only_register_168()
             CHECK(r.start == 168);  // never 21 (AC charge enable bit 7) or anything else
 }
 
+// ---- ESP-038 E: optional extra input block ----
+
+static void quietIntervals(LuxPowerTCP &lux, uint32_t holdingMs)
+{
+    lux.setInputPollInterval(10000000);
+    lux.setInputBlock2PollInterval(10000000);
+    lux.setHoldingPollInterval(holdingMs);
+}
+
+static size_t countStart(const FakeTransport &t, uint16_t start)
+{
+    size_t n = 0;
+    for (const Request &r : t.requests)
+        n += r.start == start;
+    return n;
+}
+
+static void test_extra_input_disabled_by_default()
+{
+    FakeTransport t;
+    t.value = registerValue;
+    LuxPowerTCP lux(t);
+    lux.begin("dongle", 8000, "DONGLESN01", "INVERTSN01");
+    quietIntervals(lux, 30000);
+    pollUntilAllValid(lux);
+    CHECK(!lux.poll());
+    CHECK(lux.extraInputCount() == 0 && !lux.extraInputCacheValid());
+    for (const Request &r : t.requests)
+        CHECK(r.start < 250);
+}
+
+static void test_extra_input_config_limits()
+{
+    FakeTransport t;
+    LuxPowerTCP lux(t);
+    CHECK(!lux.setExtraInputBlock(249, 10, 300000));   // overlaps input block 2
+    CHECK(!lux.setExtraInputBlock(250, 126, 300000));  // more than one block
+    CHECK(!lux.setExtraInputBlock(2000, 100, 300000)); // beyond 2047
+    CHECK(!lux.setExtraInputBlock(250, 10, 0));
+    CHECK(lux.extraInputCount() == 0);
+    CHECK(lux.setExtraInputBlock(250, 125, 300000));
+    CHECK(lux.extraInputStart() == 250 && lux.extraInputCount() == 125);
+    CHECK(lux.setExtraInputBlock(0, 0, 0));  // disable
+    CHECK(lux.extraInputCount() == 0);
+}
+
+static void test_extra_input_read_and_schedule()
+{
+    FakeTransport t;
+    t.value = registerValue;
+    LuxPowerTCP lux(t);
+    lux.begin("dongle", 8000, "DONGLESN01", "INVERTSN01");
+    quietIntervals(lux, 30000);
+    CHECK(lux.setExtraInputBlock(250, 125, 300000));
+    pollUntilAllValid(lux);  // operational blocks first
+    CHECK(countStart(t, 250) == 0);
+    CHECK(lux.poll());  // then the extra block
+    CHECK(t.requests.back().function == 0x04 && t.requests.back().start == 250 && t.requests.back().count == 125);
+    uint16_t v = 0;
+    CHECK(lux.extraInputCacheValid());
+    CHECK(lux.cachedExtraInputU16(250, v) && v == 250);
+    CHECK(lux.cachedExtraInputU16(374, v) && v == 374);
+    CHECK(!lux.cachedExtraInputU16(375, v));
+    CHECK(!lux.cachedExtraInputU16(249, v));
+    CHECK(!lux.poll());
+
+    g_now += 30000;  // holding due, extra not
+    lux.poll();
+    lux.poll();
+    CHECK(!lux.poll());
+    CHECK(countStart(t, 250) == 1);
+
+    g_now += 270000;  // 300 s since the extra read: holding first, extra last
+    lux.poll();
+    lux.poll();
+    CHECK(countStart(t, 250) == 1);
+    CHECK(lux.poll());
+    CHECK(countStart(t, 250) == 2);
+    CHECK(lux.extraInputFailures() == 0);
+}
+
+static void test_extra_input_silence_backs_off_and_keeps_socket()
+{
+    FakeTransport t;
+    t.value = registerValue;
+    LuxPowerTCP lux(t);
+    lux.begin("dongle", 8000, "DONGLESN01", "INVERTSN01");
+    quietIntervals(lux, 100000000);
+    CHECK(lux.setExtraInputBlock(250, 125, 300000));
+    pollUntilAllValid(lux);
+
+    t.silent = true;  // the inverter does not answer this range
+    for (int attempt = 1; attempt <= 4; ++attempt)
+    {
+        const uint32_t started = g_now;
+        CHECK(!lux.poll());
+        CHECK(g_now - started <= 4000);
+        CHECK(lux.connected());  // never the 3-timeout socket drop
+        CHECK(lux.extraInputFailures() == static_cast<uint32_t>(attempt));
+        CHECK(std::string(lux.lastError()) == "Response timeout (extra input block)");
+        const size_t requests = t.requests.size();
+        g_now += 300000;  // the normal interval is not enough after a failure
+        CHECK(!lux.poll());
+        CHECK(t.requests.size() == requests);
+        g_now += LuxPowerTCP::kExtraInputRetryMs - 300000;
+    }
+    CHECK(!lux.extraInputCacheValid());
+
+    t.silent = false;
+    t.answerStartOverride = 0;  // an answer for another range is skipped
+    CHECK(!lux.poll());
+    CHECK(!lux.extraInputCacheValid() && lux.connected());
+
+    t.answerStartOverride = -1;
+    g_now += LuxPowerTCP::kExtraInputRetryMs;
+    CHECK(lux.poll());
+    CHECK(lux.extraInputCacheValid());
+    uint16_t v = 0;
+    CHECK(lux.cachedExtraInputU16(300, v) && v == 300);
+}
+
 int main()
 {
     test_block2_read_and_cache();
@@ -357,6 +478,10 @@ int main()
     test_ac_charge_bad_echo_is_communication_error();
     test_ac_charge_silent_dongle_writes_nothing();
     test_ac_charge_writes_only_register_168();
+    test_extra_input_disabled_by_default();
+    test_extra_input_config_limits();
+    test_extra_input_read_and_schedule();
+    test_extra_input_silence_backs_off_and_keeps_socket();
     if (g_failures)
     {
         std::printf("holding block 2: %d check(s) failed\n", g_failures);

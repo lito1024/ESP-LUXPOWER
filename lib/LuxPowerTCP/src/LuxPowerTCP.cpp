@@ -2426,8 +2426,13 @@ bool LuxPowerTCP::poll()
     const bool holdingDue = !cache_.holdingValid || (now - cache_.holdingUpdated) >= holdingPollInterval_;
     const bool holdingBlock2Due =
         !cache_.holdingBlock2Valid || (now - cache_.holdingBlock2Updated) >= holdingPollInterval_;
+    // ESP-038 E: after a failure wait at least kExtraInputRetryMs.
+    const uint32_t extraInputWaitMs =
+        extraInputLastOk_ || extraInputInterval_ >= kExtraInputRetryMs ? extraInputInterval_ : kExtraInputRetryMs;
+    const bool extraInputDue = extraInputCount_ != 0 &&
+                               (!extraInputAttempted_ || (now - extraInputLastAttemptMs_) >= extraInputWaitMs);
 
-    if (!inputDue && !inputBlock2Due && !holdingDue && !holdingBlock2Due)
+    if (!inputDue && !inputBlock2Due && !holdingDue && !holdingBlock2Due && !extraInputDue)
     {
         return false;
     }
@@ -2447,14 +2452,203 @@ bool LuxPowerTCP::poll()
         return refreshInputBlock2();
     }
 
-    // ESP-030: holding block 2 last -- same interval as holding block 1,
-    // one extra round trip per holding interval.
+    // ESP-030: holding block 2 after holding block 1 -- same interval, one
+    // extra round trip per holding interval.
     if (holdingDue)
     {
         return refreshHoldingBlock();
     }
 
-    return refreshHoldingBlock2();
+    if (holdingBlock2Due)
+    {
+        return refreshHoldingBlock2();
+    }
+
+    // ESP-038 E: the extra input block only when nothing else is due.
+    return refreshExtraInputBlock();
+}
+
+bool LuxPowerTCP::setExtraInputBlock(uint16_t start, uint16_t count, uint32_t intervalMs)
+{
+    if (count == 0)
+    {
+        extraInputCount_ = 0;
+        extraInputValid_ = false;
+        return true;
+    }
+    if (start < kInputTotalSize || count > kExtraInputMaxSize || static_cast<uint32_t>(start) + count > 2048 ||
+        intervalMs == 0)
+    {
+        return false;
+    }
+    extraInputStart_ = start;
+    extraInputCount_ = count;
+    extraInputInterval_ = intervalMs;
+    extraInputAttempted_ = false;
+    extraInputLastOk_ = false;
+    extraInputValid_ = false;
+    return true;
+}
+
+uint16_t LuxPowerTCP::extraInputStart() const
+{
+    return extraInputStart_;
+}
+
+uint16_t LuxPowerTCP::extraInputCount() const
+{
+    return extraInputCount_;
+}
+
+bool LuxPowerTCP::extraInputCacheValid() const
+{
+    return extraInputValid_;
+}
+
+uint32_t LuxPowerTCP::extraInputCacheAge() const
+{
+    if (!extraInputValid_)
+    {
+        return 0;
+    }
+
+    return luxPowerMillis() - extraInputUpdated_;
+}
+
+uint32_t LuxPowerTCP::extraInputFailures() const
+{
+    return extraInputFailures_;
+}
+
+bool LuxPowerTCP::cachedExtraInputU16(uint16_t address, uint16_t &value) const
+{
+    if (!extraInputValid_ || address < extraInputStart_ || address - extraInputStart_ >= extraInputCount_)
+    {
+        return false;
+    }
+
+    value = extraInput_[address - extraInputStart_];
+    return true;
+}
+
+// ESP-038 E: same request/response handling as refreshInputBlock2, but a
+// timeout or a short answer never drops the socket the operational blocks
+// share (only a broken stream -- incomplete frame, bad CRC -- does, as for
+// every other block), and every outcome stands until the next attempt.
+bool LuxPowerTCP::refreshExtraInputBlock()
+{
+    extraInputAttempted_ = true;
+    extraInputLastAttemptMs_ = luxPowerMillis();
+    extraInputLastOk_ = false;
+
+    if (!connect())
+    {
+        ++extraInputFailures_;
+        return false;
+    }
+
+    consumeUnsolicitedFrames(50);
+
+    uint8_t request[38];
+    const size_t requestLength =
+        buildReadRequest(request, sizeof(request), extraInputStart_, extraInputCount_, MODBUS_FUNCTION_READ_INPUT);
+
+    if (requestLength == 0 || transport_.write(request, requestLength) != requestLength)
+    {
+        luxPowerLog("Ошибка отправки запроса (extra input block).");
+        ++extraInputFailures_;
+        disconnect();
+        return false;
+    }
+    transport_.flush();
+
+    uint8_t response[1024];
+    size_t responseLength = 0;
+
+    const uint32_t overallStartedAt = luxPowerMillis();
+
+    while (luxPowerMillis() - overallStartedAt < MATCHING_RESPONSE_TIMEOUT_MS)
+    {
+        if (!readLuxFrame(response, sizeof(response), responseLength, MATCHING_RESPONSE_TIMEOUT_MS))
+        {
+            continue;
+        }
+
+        if (responseLength < 36)
+        {
+            continue;
+        }
+
+        const uint8_t responseFunctionCode = response[21];
+        const uint16_t returnedRegister = response[32] | (static_cast<uint16_t>(response[33]) << 8);
+
+        if (responseFunctionCode != MODBUS_FUNCTION_READ_INPUT || returnedRegister != extraInputStart_)
+        {
+            continue;
+        }
+
+        const uint16_t frameLength =
+            response[4] |
+            (static_cast<uint16_t>(response[5]) << 8);
+
+        const size_t expectedLength = frameLength + 6;
+
+        if (responseLength < expectedLength)
+        {
+            luxPowerLog("Неполный пакет (extra input block).");
+            ++extraInputFailures_;
+            disconnect();
+            return false;
+        }
+
+        const uint16_t receivedCrc =
+            response[expectedLength - 2] |
+            (static_cast<uint16_t>(response[expectedLength - 1]) << 8);
+
+        if (receivedCrc != modbusCrc16(&response[20], expectedLength - 22))
+        {
+            luxPowerLog("Ошибка CRC (extra input block).");
+            ++extraInputFailures_;
+            disconnect();
+            return false;
+        }
+
+        const uint8_t byteCount = response[34];
+
+        if (byteCount != extraInputCount_ * 2 || expectedLength < 37u + byteCount)
+        {
+            luxPowerLogf("Недостаточно данных (extra input block): %u байт\n", byteCount);
+            lastError_ = "Extra input block: short answer";
+            ++extraInputFailures_;
+            return false;
+        }
+
+        for (size_t index = 0; index < extraInputCount_; ++index)
+        {
+            const size_t offset = 35 + (index * 2);
+            extraInput_[index] = response[offset] | (static_cast<uint16_t>(response[offset + 1]) << 8);
+        }
+
+        extraInputValid_ = true;
+        extraInputUpdated_ = luxPowerMillis();
+        extraInputLastOk_ = true;
+        lastError_ = "No error";
+        return true;
+    }
+
+    ++extraInputFailures_;
+    if (!transport_.connected())
+    {
+        lastError_ = "Socket disconnected during refresh (extra input block)";
+        disconnect();
+        return false;
+    }
+
+    lastError_ = "Response timeout (extra input block)";
+    luxPowerLogf("Таймаут ответа (extra input block, попытка %lu); следующая не раньше чем через %lu с.\n",
+                  static_cast<unsigned long>(extraInputFailures_),
+                  static_cast<unsigned long>(kExtraInputRetryMs / 1000));
+    return false;
 }
 
 void LuxPowerTCP::setInputPollInterval(uint32_t intervalMs)
