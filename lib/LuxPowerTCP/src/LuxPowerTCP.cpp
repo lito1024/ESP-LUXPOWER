@@ -1372,6 +1372,54 @@ LuxPowerTCP::WriteStatus LuxPowerTCP::setMaxBackflowPower(uint8_t percent, uint8
     return (readbackPercent == percent) ? WriteStatus::Success : WriteStatus::ReadbackMismatch;
 }
 
+LuxPowerTCP::WriteStatus LuxPowerTCP::setAcChargeCurrent(uint8_t amps, uint8_t &previousAmps, uint8_t &readbackAmps)
+{
+    previousAmps = 0;
+    readbackAmps = 0;
+
+    constexpr uint16_t kAcChargeCurrentRegister = 168;
+
+    // Same cycle as setMaxBackflowPower(), against holding block 2: a fresh
+    // read right now, never the 30 s cache.
+    if (!refreshHoldingBlock2())
+    {
+        return WriteStatus::CommunicationError;
+    }
+
+    uint16_t currentRaw = 0;
+    if (!cachedHoldingU16(kAcChargeCurrentRegister, currentRaw))
+    {
+        return WriteStatus::CommunicationError;
+    }
+    previousAmps = static_cast<uint8_t>(currentRaw > 255 ? 255 : currentRaw);
+
+    if (currentRaw == amps)
+    {
+        readbackAmps = previousAmps;
+        return WriteStatus::AlreadySet;
+    }
+
+    uint16_t echoedValue = 0;
+    if (!writeRegisterSingle(kAcChargeCurrentRegister, amps, echoedValue) || echoedValue != amps)
+    {
+        return WriteStatus::CommunicationError;
+    }
+
+    if (!refreshHoldingBlock2())
+    {
+        return WriteStatus::CommunicationError;
+    }
+
+    uint16_t readbackRaw = 0;
+    if (!cachedHoldingU16(kAcChargeCurrentRegister, readbackRaw))
+    {
+        return WriteStatus::CommunicationError;
+    }
+    readbackAmps = static_cast<uint8_t>(readbackRaw > 255 ? 255 : readbackRaw);
+
+    return (readbackRaw == amps) ? WriteStatus::Success : WriteStatus::ReadbackMismatch;
+}
+
 LuxPowerTCP::WriteStatus LuxPowerTCP::setZeroExportEnabled(bool enabled, bool &previousEnabled, bool &readbackEnabled)
 {
     previousEnabled = false;

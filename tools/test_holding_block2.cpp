@@ -1,4 +1,5 @@
-// ESP-030 host test: LuxPowerTCP holding block 2 (registers 125..249).
+// ESP-030 host test: LuxPowerTCP holding block 2 (registers 125..249) and,
+// phase 2, the AC charge current write (holding 168).
 // Builds LuxPowerTCP.cpp without ARDUINO against a scripted fake transport
 // and a fake clock. Run via tools/run_holding_block2_tests.py.
 #include "../lib/LuxPowerTCP/src/LuxPowerTCP.h"
@@ -44,8 +45,14 @@ struct Request
 {
     uint8_t function;
     uint16_t start;
-    uint16_t count;
+    uint16_t count;  // for a write (0x06): the value written
 };
+
+// Simulated inverter: holding 168 (AC charge current, A). A write stores the
+// value unless the inverter "ignores" it (readback mismatch case).
+static uint16_t g_reg168 = 10;
+static bool g_ignoreWrites = false;
+static int g_echoOverride = -1;  // >= 0: the write echo carries this value
 
 // Answers every read request with a well-formed frame whose register values
 // are value(space, address). `answerStartOverride` >= 0 answers with a wrong
@@ -80,7 +87,11 @@ public:
         const Request r{data[21], static_cast<uint16_t>(data[32] | (data[33] << 8)),
                         static_cast<uint16_t>(data[34] | (data[35] << 8))};
         requests.push_back(r);
-        if (!silent)
+        if (silent)
+            return length;
+        if (r.function == 0x06)
+            answerWrite(r);
+        else
             answer(r);
         return length;
     }
@@ -88,6 +99,29 @@ public:
 private:
     bool open_ = false;
     std::deque<uint8_t> rx_;
+
+    void answerWrite(const Request &r)
+    {
+        if (r.start == 168 && !g_ignoreWrites)
+            g_reg168 = r.count;
+        const uint16_t echo = g_echoOverride >= 0 ? static_cast<uint16_t>(g_echoOverride) : r.count;
+        const size_t total = 38;
+        std::vector<uint8_t> f(total, 0);
+        f[0] = 0xA1;
+        f[1] = 0x1A;
+        f[2] = 2;
+        f[4] = static_cast<uint8_t>(total - 6);
+        f[20] = 1;
+        f[21] = 0x06;
+        f[32] = static_cast<uint8_t>(r.start & 0xFF);
+        f[33] = static_cast<uint8_t>(r.start >> 8);
+        f[34] = static_cast<uint8_t>(echo & 0xFF);
+        f[35] = static_cast<uint8_t>(echo >> 8);
+        const uint16_t crc = crc16(&f[20], total - 22);
+        f[total - 2] = static_cast<uint8_t>(crc & 0xFF);
+        f[total - 1] = static_cast<uint8_t>(crc >> 8);
+        rx_.insert(rx_.end(), f.begin(), f.end());
+    }
 
     void answer(const Request &r)
     {
@@ -121,7 +155,7 @@ private:
 static uint16_t registerValue(uint8_t function, uint16_t address)
 {
     if (function == 0x03)
-        return address == 168 ? 10 : static_cast<uint16_t>(1000 + address);
+        return address == 168 ? g_reg168 : static_cast<uint16_t>(1000 + address);
     return static_cast<uint16_t>(address);
 }
 
@@ -207,11 +241,122 @@ static void test_wrong_or_missing_answer_keeps_block2_invalid()
     CHECK(std::string(lux.lastError()) == "Response timeout");
 }
 
+// ---- ESP-030 phase 2: setAcChargeCurrent (holding 168 only) ----
+
+static void resetInverter()
+{
+    g_reg168 = 10;
+    g_ignoreWrites = false;
+    g_echoOverride = -1;
+}
+
+static size_t countWrites(const FakeTransport &t)
+{
+    size_t n = 0;
+    for (const Request &r : t.requests)
+        n += r.function == 0x06;
+    return n;
+}
+
+static void test_ac_charge_write_success()
+{
+    resetInverter();
+    FakeTransport t;
+    t.value = registerValue;
+    LuxPowerTCP lux(t);
+    lux.begin("dongle", 8000, "DONGLESN01", "INVERTSN01");
+    uint8_t previous = 99, readback = 99;
+    CHECK(lux.setAcChargeCurrent(0, previous, readback) == LuxPowerTCP::WriteStatus::Success);
+    CHECK(previous == 10 && readback == 0 && g_reg168 == 0);
+    // fresh read of block 2 -> write 168 -> read block 2 again
+    CHECK(t.requests.size() == 3);
+    CHECK(t.requests[0].function == 0x03 && t.requests[0].start == 125 && t.requests[0].count == 125);
+    CHECK(t.requests[1].function == 0x06 && t.requests[1].start == 168 && t.requests[1].count == 0);
+    CHECK(t.requests[2].function == 0x03 && t.requests[2].start == 125);
+    CHECK(lux.setAcChargeCurrent(40, previous, readback) == LuxPowerTCP::WriteStatus::Success);
+    CHECK(previous == 0 && readback == 40);
+}
+
+static void test_ac_charge_already_set_writes_nothing()
+{
+    resetInverter();
+    FakeTransport t;
+    t.value = registerValue;
+    LuxPowerTCP lux(t);
+    lux.begin("dongle", 8000, "DONGLESN01", "INVERTSN01");
+    uint8_t previous = 0, readback = 0;
+    CHECK(lux.setAcChargeCurrent(10, previous, readback) == LuxPowerTCP::WriteStatus::AlreadySet);
+    CHECK(previous == 10 && readback == 10);
+    CHECK(countWrites(t) == 0);
+}
+
+static void test_ac_charge_readback_mismatch()
+{
+    resetInverter();
+    g_ignoreWrites = true;  // echo OK, but the inverter keeps 10 A
+    FakeTransport t;
+    t.value = registerValue;
+    LuxPowerTCP lux(t);
+    lux.begin("dongle", 8000, "DONGLESN01", "INVERTSN01");
+    uint8_t previous = 0, readback = 0;
+    CHECK(lux.setAcChargeCurrent(0, previous, readback) == LuxPowerTCP::WriteStatus::ReadbackMismatch);
+    CHECK(previous == 10 && readback == 10);
+}
+
+static void test_ac_charge_bad_echo_is_communication_error()
+{
+    resetInverter();
+    g_echoOverride = 7;
+    FakeTransport t;
+    t.value = registerValue;
+    LuxPowerTCP lux(t);
+    lux.begin("dongle", 8000, "DONGLESN01", "INVERTSN01");
+    uint8_t previous = 0, readback = 0;
+    CHECK(lux.setAcChargeCurrent(0, previous, readback) == LuxPowerTCP::WriteStatus::CommunicationError);
+    CHECK(t.requests.size() == 2);  // no read-back after a bad echo
+}
+
+static void test_ac_charge_silent_dongle_writes_nothing()
+{
+    resetInverter();
+    FakeTransport t;
+    t.value = registerValue;
+    t.silent = true;
+    LuxPowerTCP lux(t);
+    lux.begin("dongle", 8000, "DONGLESN01", "INVERTSN01");
+    uint8_t previous = 0, readback = 0;
+    CHECK(lux.setAcChargeCurrent(0, previous, readback) == LuxPowerTCP::WriteStatus::CommunicationError);
+    CHECK(countWrites(t) == 0);  // the current value could not be read -> no write
+    CHECK(g_reg168 == 10);
+}
+
+static void test_ac_charge_writes_only_register_168()
+{
+    resetInverter();
+    FakeTransport t;
+    t.value = registerValue;
+    LuxPowerTCP lux(t);
+    lux.begin("dongle", 8000, "DONGLESN01", "INVERTSN01");
+    uint8_t previous = 0, readback = 0;
+    for (uint8_t amps : {0, 20, 40, 5})
+        lux.setAcChargeCurrent(amps, previous, readback);
+    CHECK(countWrites(t) == 4);
+    for (const Request &r : t.requests)
+        if (r.function == 0x06)
+            CHECK(r.start == 168);  // never 21 (AC charge enable bit 7) or anything else
+}
+
 int main()
 {
     test_block2_read_and_cache();
     test_poll_schedule();
     test_wrong_or_missing_answer_keeps_block2_invalid();
+    test_ac_charge_write_success();
+    test_ac_charge_already_set_writes_nothing();
+    test_ac_charge_readback_mismatch();
+    test_ac_charge_bad_echo_is_communication_error();
+    test_ac_charge_silent_dongle_writes_nothing();
+    test_ac_charge_writes_only_register_168();
     if (g_failures)
     {
         std::printf("holding block 2: %d check(s) failed\n", g_failures);

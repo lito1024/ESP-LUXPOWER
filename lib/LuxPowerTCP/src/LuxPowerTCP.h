@@ -100,6 +100,12 @@ public:
     };
     WriteStatus setMaxBackflowPower(uint8_t percent, uint8_t &previousPercent, uint8_t &readbackPercent);
     WriteStatus setZeroExportEnabled(bool enabled, bool &previousEnabled, bool &readbackEnabled);
+    // ESP-030 phase 2 (D-020): AC charge current from grid, holding 168 (A,
+    // scale 1) in holding block 2. Callers pass an already-validated value
+    // (0..kAcChargeCurrentMaxAmps); the AC charge enable bit (holding 21
+    // bit 7) is never touched.
+    static constexpr uint8_t kAcChargeCurrentMaxAmps = 40;
+    WriteStatus setAcChargeCurrent(uint8_t amps, uint8_t &previousAmps, uint8_t &readbackAmps);
 
     uint16_t lastU16() const;
     uint32_t lastU32() const;
